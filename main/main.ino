@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <ESP32Servo.h>
 #include <Preferences.h>
+#include <stdlib.h>  // For random numbers
 
 // Constants and configurations
 #define SERVO_MIN 70
@@ -118,7 +119,7 @@ void testAllServos() {
   passengerRear.write(SERVO_MID);
   delay(500);  // Give some time for servos to reach their positions
 
-  double initialTilt = getTilt();  // Simulate initial tilt
+  double initialTilt = getTilt("initial");  // Simulate initial tilt
 
   driverSideTestPassed = testServoPair(driverFront, driverRear, initialTilt, "Driver Side");
   passengerSideTestPassed = testServoPair(passengerFront, passengerRear, initialTilt, "Passenger Side");
@@ -143,7 +144,7 @@ bool testServoPair(Servo& servo1, Servo& servo2, double initialTilt, const char*
   delay(500);
 
   // Simulate tilt after moving to minimum position
-  double minTilt = getTilt();
+  double minTilt = getTilt(description);
 
   // Move servos to their maximum positions
   servo1.write(SERVO_MAX);
@@ -151,7 +152,7 @@ bool testServoPair(Servo& servo1, Servo& servo2, double initialTilt, const char*
   delay(500);
 
   // Simulate tilt after moving to maximum position
-  double maxTilt = getTilt();
+  double maxTilt = getTilt(description);
 
   // Check if the tilt is in the expected direction
   bool testPassed = false;
@@ -199,13 +200,20 @@ void setLedIndicator(const char* description, int greenState, int redState) {
   }
 }
 
-double getTilt() {
-  // Simulate reading the tilt from MPU6050
-  // This function should return the current tilt angle
-  // For simplicity, return a mock value
-  static double mockTilt = 0.0;
-  mockTilt += 0.1;  // Increment the tilt value to simulate change
-  return mockTilt;
+double getTilt(const char* description) {
+  // Generate random mock tilt values
+  // Simulate a failure for one specific servo pair
+  if (strcmp(description, "Driver Side") == 0) {
+    return (rand() % 100) / 10.0;  // Random value between 0.0 and 10.0
+  } else if (strcmp(description, "Passenger Side") == 0) {
+    return 5.0 + (rand() % 50) / 10.0;  // Random value between 5.0 and 10.0
+  } else if (strcmp(description, "Front") == 0) {
+    return 0.0;  // Simulate a failure condition with constant tilt
+  } else if (strcmp(description, "Rear") == 0) {
+    return 5.0 + (rand() % 50) / 10.0;  // Random value between 5.0 and 10.0
+  } else {
+    return 0.0;  // Default value for initial tilt
+  }
 }
 
 void analyzeTestResults() {
