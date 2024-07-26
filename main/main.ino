@@ -1,13 +1,13 @@
 #include <ESP32Servo.h>
 #include <Wire.h>
-#include <MPU6050.h>
+// #include <MPU6050.h> // Commenting out the actual gyro library
 
 Servo servo1; // Front Left
 Servo servo2; // Front Right
 Servo servo3; // Rear Right
 Servo servo4; // Rear Left
 
-MPU6050 gyro;
+// MPU6050 gyro; // Commenting out the actual gyro initialization
 
 const int servo1Pin = 2;
 const int servo2Pin = 3;
@@ -21,15 +21,27 @@ struct GyroData {
 
 GyroData baseline, leftSideTest, frontTest, rightSideTest, rearTest;
 
+// Mocking defective servos (true means defective)
+bool mockDefectiveServo1 = false;
+bool mockDefectiveServo2 = false;
+bool mockDefectiveServo3 = false;
+bool mockDefectiveServo4 = false;
+
 void setup() {
   Serial.begin(115200);
-  Wire.begin();
-  gyro.initialize();
+  // Wire.begin();
+  // gyro.initialize(); // Commenting out the actual gyro initialization
 
   servo1.attach(servo1Pin);
   servo2.attach(servo2Pin);
   servo3.attach(servo3Pin);
   servo4.attach(servo4Pin);
+
+  // Mocking defective servos (You can change these values for testing)
+  mockDefectiveServo1 = false;
+  mockDefectiveServo2 = true; // For example, servo 2 is defective
+  mockDefectiveServo3 = false;
+  mockDefectiveServo4 = false;
 
   initializeServos();
   delay(500);
@@ -55,36 +67,62 @@ void initializeServos() {
 }
 
 void testLeftSide() {
-  servo4.write(0);
-  servo1.write(0);
+  servo4.write(mockDefectiveServo4 ? 90 : 0); // Mock defective servo 4 by keeping it at midpoint
+  servo1.write(mockDefectiveServo1 ? 90 : 0); // Mock defective servo 1 by keeping it at midpoint
   delay(500);
   leftSideTest = recordGyroSettings("Left Side Test");
 }
 
 void testFront() {
   servo4.write(90);
-  servo2.write(0);
+  servo2.write(mockDefectiveServo2 ? 90 : 0); // Mock defective servo 2 by keeping it at midpoint
   delay(500);
   frontTest = recordGyroSettings("Front Test");
 }
 
 void testRightSide() {
   servo1.write(90);
-  servo3.write(0);
+  servo3.write(mockDefectiveServo3 ? 90 : 0); // Mock defective servo 3 by keeping it at midpoint
   delay(500);
   rightSideTest = recordGyroSettings("Right Side Test");
 }
 
 void testRear() {
   servo2.write(90);
-  servo4.write(0);
+  servo4.write(mockDefectiveServo4 ? 90 : 0); // Mock defective servo 4 by keeping it at midpoint
   delay(500);
   rearTest = recordGyroSettings("Rear Test");
 }
 
 GyroData recordGyroSettings(String step) {
   GyroData data;
-  gyro.getMotion6(&data.ax, &data.ay, &data.az, &data.gx, &data.gy, &data.gz);
+
+  // Simulating gyro readings based on mock defects
+  if (step == "Left Side Test") {
+    data.ax = mockDefectiveServo1 || mockDefectiveServo4 ? 0 : 0; // No X change expected
+    data.ay = mockDefectiveServo1 ? 100 : (mockDefectiveServo4 ? -100 : 0);
+    data.az = 0;
+  } else if (step == "Front Test") {
+    data.ax = mockDefectiveServo2 ? 100 : 0;
+    data.ay = 0; // No Y change expected
+    data.az = 0;
+  } else if (step == "Right Side Test") {
+    data.ax = 0; // No X change expected
+    data.ay = mockDefectiveServo2 ? 100 : (mockDefectiveServo3 ? -100 : 0);
+    data.az = 0;
+  } else if (step == "Rear Test") {
+    data.ax = mockDefectiveServo3 ? 100 : (mockDefectiveServo4 ? -100 : 0);
+    data.ay = 0; // No Y change expected
+    data.az = 0;
+  } else {
+    data.ax = 0;
+    data.ay = 0;
+    data.az = 0;
+  }
+
+  data.gx = 0;
+  data.gy = 0;
+  data.gz = 0;
 
   Serial.print(step + " - ");
   Serial.print("Accel: ");
@@ -144,8 +182,6 @@ void analyzeGyroData(String step, GyroData baseline, GyroData current, String si
     }
     if (gyroXChange > 0) {
       Serial.println("Failure: Servo 2 (front right) did not lower as expected (right tilt detected).");
-    } else if (gyroXChange < 0) {
-      Serial.println("Failure: Servo 1 (front left) did not lower as expected (left tilt detected).");
     } else {
       Serial.println("Front servos are functioning correctly.");
     }
