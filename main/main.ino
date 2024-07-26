@@ -1,224 +1,175 @@
-#include <Wire.h>
 #include <ESP32Servo.h>
-#include <Preferences.h>
-#include <stdlib.h>  // For random numbers
+#include <Wire.h>
+#include <MPU6050.h>
 
-// Constants and configurations
-#define SERVO_MIN 70
-#define SERVO_MID 90
-#define SERVO_MAX 110
+Servo servo1; // Front Left
+Servo servo2; // Front Right
+Servo servo3; // Rear Right
+Servo servo4; // Rear Left
 
-Servo driverFront, driverRear, passengerFront, passengerRear;  // Servo objects
-#define DRIVER_FRONT_PIN 5
-#define DRIVER_REAR_PIN 19
-#define PASSENGER_FRONT_PIN 18
-#define PASSENGER_REAR_PIN 21
+MPU6050 gyro;
 
-#define MPU6050_ADDRESS 0x68
-#define WHO_AM_I_REGISTER 0x75
-#define EXPECTED_WHO_AM_I 0x68  // Expected return value from WHO_AM_I register of MPU6050
-#define LED_PIN 2               // Onboard LED pin on ESP32
+const int servo1Pin = 2;
+const int servo2Pin = 3;
+const int servo3Pin = 4;
+const int servo4Pin = 5;
 
-// LED pins for visual indicators
-#define DRIVER_FRONT_LED 12
-#define DRIVER_REAR_LED 13
-#define PASSENGER_FRONT_LED 14
-#define PASSENGER_REAR_LED 15
+struct GyroData {
+  int16_t ax, ay, az;
+  int16_t gx, gy, gz;
+};
 
-bool driverSideTestPassed = true;
-bool passengerSideTestPassed = true;
-bool frontTestPassed = true;
-bool rearTestPassed = true;
+GyroData baseline, leftSideTest, frontTest, rightSideTest, rearTest;
 
 void setup() {
-  pinMode(LED_PIN, OUTPUT);  // Set the LED pin as an output
-
-  // Set LED pins as outputs
-  pinMode(DRIVER_FRONT_LED, OUTPUT);
-  pinMode(DRIVER_REAR_LED, OUTPUT);
-  pinMode(PASSENGER_FRONT_LED, OUTPUT);
-  pinMode(PASSENGER_REAR_LED, OUTPUT);
-
   Serial.begin(115200);
   Wire.begin();
+  gyro.initialize();
 
-  // Comment out the MPU6050 initialization test
-  /*
-  if (!initializeMPU6050()) {
-    Serial.println("Critical Error: MPU6050 initialization failed. System halted.");
-    enterErrorState();
-  }
+  servo1.attach(servo1Pin);
+  servo2.attach(servo2Pin);
+  servo3.attach(servo3Pin);
+  servo4.attach(servo4Pin);
 
-  Serial.println("MPU6050 initialized successfully. System operational.");
-  */
+  initializeServos();
+  delay(500);
+  baseline = recordGyroSettings("Baseline");
 
-  attachServos();
-  testAllServos();  // Test all servos
+  testLeftSide();
+  testFront();
+  testRightSide();
+  testRear();
 
-  analyzeTestResults();
+  analyzeResults();
 }
 
 void loop() {
-  // Main operational code
+  // This is intentionally left empty.
 }
 
-/*
-// Comment out the MPU6050 initialization function
-bool initializeMPU6050() {
-  Wire.beginTransmission(MPU6050_ADDRESS);
-  Wire.write(WHO_AM_I_REGISTER);  // WHO_AM_I register address
-  if (Wire.endTransmission(false) == 0 && Wire.requestFrom(MPU6050_ADDRESS, 1)) {
-    if (Wire.available()) {
-      byte whoAmI = Wire.read();
-      return (whoAmI == EXPECTED_WHO_AM_I);
+void initializeServos() {
+  servo1.write(90);
+  servo2.write(90);
+  servo3.write(90);
+  servo4.write(90);
+}
+
+void testLeftSide() {
+  servo4.write(0);
+  servo1.write(0);
+  delay(500);
+  leftSideTest = recordGyroSettings("Left Side Test");
+}
+
+void testFront() {
+  servo4.write(90);
+  servo2.write(0);
+  delay(500);
+  frontTest = recordGyroSettings("Front Test");
+}
+
+void testRightSide() {
+  servo1.write(90);
+  servo3.write(0);
+  delay(500);
+  rightSideTest = recordGyroSettings("Right Side Test");
+}
+
+void testRear() {
+  servo2.write(90);
+  servo4.write(0);
+  delay(500);
+  rearTest = recordGyroSettings("Rear Test");
+}
+
+GyroData recordGyroSettings(String step) {
+  GyroData data;
+  gyro.getMotion6(&data.ax, &data.ay, &data.az, &data.gx, &data.gy, &data.gz);
+
+  Serial.print(step + " - ");
+  Serial.print("Accel: ");
+  Serial.print("X: "); Serial.print(data.ax); 
+  Serial.print(" Y: "); Serial.print(data.ay); 
+  Serial.print(" Z: "); Serial.println(data.az);
+
+  Serial.print("Gyro: ");
+  Serial.print("X: "); Serial.print(data.gx); 
+  Serial.print(" Y: "); Serial.print(data.gy); 
+  Serial.print(" Z: "); Serial.println(data.gz);
+
+  return data;
+}
+
+void analyzeResults() {
+  analyzeGyroData("Left Side Test", baseline, leftSideTest, "left");
+  analyzeGyroData("Front Test", baseline, frontTest, "front");
+  analyzeGyroData("Right Side Test", baseline, rightSideTest, "right");
+  analyzeGyroData("Rear Test", baseline, rearTest, "rear");
+}
+
+void analyzeGyroData(String step, GyroData baseline, GyroData current, String side) {
+  Serial.println(step + " Analysis:");
+
+  int16_t accelXChange = current.ax - baseline.ax;
+  int16_t accelYChange = current.ay - baseline.ay;
+  int16_t accelZChange = current.az - baseline.az;
+  
+  int16_t gyroXChange = current.gx - baseline.gx;
+  int16_t gyroYChange = current.gy - baseline.gy;
+  int16_t gyroZChange = current.gz - baseline.gz;
+
+  Serial.print("Accel X Change: "); Serial.println(accelXChange);
+  Serial.print("Accel Y Change: "); Serial.println(accelYChange);
+  Serial.print("Accel Z Change: "); Serial.println(accelZChange);
+  
+  Serial.print("Gyro X Change: "); Serial.println(gyroXChange);
+  Serial.print("Gyro Y Change: "); Serial.println(gyroYChange);
+  Serial.print("Gyro Z Change: "); Serial.println(gyroZChange);
+
+  // Analysis logic
+  if (side == "left") {
+    if (gyroXChange != 0) {
+      Serial.println("Failure: Unexpected X tilt when testing left side.");
+    }
+    if (gyroYChange > 0) {
+      Serial.println("Failure: Servo 1 (front left) did not lower as expected (forward tilt detected).");
+    } else if (gyroYChange < 0) {
+      Serial.println("Failure: Servo 4 (rear left) did not lower as expected (backward tilt detected).");
+    } else {
+      Serial.println("Left side servos are functioning correctly.");
+    }
+  } else if (side == "front") {
+    if (gyroYChange != 0) {
+      Serial.println("Failure: Unexpected Y tilt when testing front side.");
+    }
+    if (gyroXChange > 0) {
+      Serial.println("Failure: Servo 2 (front right) did not lower as expected (right tilt detected).");
+    } else if (gyroXChange < 0) {
+      Serial.println("Failure: Servo 1 (front left) did not lower as expected (left tilt detected).");
+    } else {
+      Serial.println("Front servos are functioning correctly.");
+    }
+  } else if (side == "right") {
+    if (gyroXChange != 0) {
+      Serial.println("Failure: Unexpected X tilt when testing right side.");
+    }
+    if (gyroYChange > 0) {
+      Serial.println("Failure: Servo 2 (front right) did not lower as expected (forward tilt detected).");
+    } else if (gyroYChange < 0) {
+      Serial.println("Failure: Servo 3 (rear right) did not lower as expected (backward tilt detected).");
+    } else {
+      Serial.println("Right side servos are functioning correctly.");
+    }
+  } else if (side == "rear") {
+    if (gyroYChange != 0) {
+      Serial.println("Failure: Unexpected Y tilt when testing rear side.");
+    }
+    if (gyroXChange > 0) {
+      Serial.println("Failure: Servo 3 (rear right) did not lower as expected (right tilt detected).");
+    } else if (gyroXChange < 0) {
+      Serial.println("Failure: Servo 4 (rear left) did not lower as expected (left tilt detected).");
+    } else {
+      Serial.println("Rear servos are functioning correctly.");
     }
   }
-  handleMPU6050Error(); // Handle the error if MPU6050 is not initialized correctly
-  return false;
-}
-*/
-
-void handleMPU6050Error() {
-    Serial.println("Error: gyro not detected");
-    setServosToMidpoint();
-    enterErrorState();
-}
-
-void setServosToMidpoint() {
-    // Move all servos to their midpoint position
-    driverFront.write(SERVO_MID);
-    driverRear.write(SERVO_MID);
-    passengerFront.write(SERVO_MID);
-    passengerRear.write(SERVO_MID);
-    Serial.println("All servos moved to midpoint.");
-}
-
-void enterErrorState() {
-    while (true) {
-        for (int i = 0; i < 5; i++) {  // Flash 5 times
-            digitalWrite(LED_PIN, HIGH);
-            delay(200);               // On for 200 milliseconds
-            digitalWrite(LED_PIN, LOW);
-            delay(200);               // Off for 200 milliseconds
-        }
-        delay(2000);  // Pause for 2 seconds
-    }
-}
-
-void attachServos() {
-  driverFront.attach(DRIVER_FRONT_PIN);
-  driverRear.attach(DRIVER_REAR_PIN);
-  passengerFront.attach(PASSENGER_FRONT_PIN);
-  passengerRear.attach(PASSENGER_REAR_PIN);
-}
-
-void testAllServos() {
-  driverFront.write(SERVO_MID);
-  driverRear.write(SERVO_MID);
-  passengerFront.write(SERVO_MID);
-  passengerRear.write(SERVO_MID);
-  delay(500);  // Give some time for servos to reach their positions
-
-  double initialTilt = getTilt("initial");  // Simulate initial tilt
-
-  driverSideTestPassed = testServoPair(driverFront, driverRear, initialTilt, "Driver Side");
-  passengerSideTestPassed = testServoPair(passengerFront, passengerRear, initialTilt, "Passenger Side");
-  frontTestPassed = testServoPair(driverFront, passengerFront, initialTilt, "Front");
-  rearTestPassed = testServoPair(driverRear, passengerRear, initialTilt, "Rear");
-
-  // Return all servos to middle position after tests
-  driverFront.write(SERVO_MID);
-  driverRear.write(SERVO_MID);
-  passengerFront.write(SERVO_MID);
-  passengerRear.write(SERVO_MID);
-  Serial.println("All tests completed. Servos returned to neutral position.");
-}
-
-bool testServoPair(Servo& servo1, Servo& servo2, double initialTilt, const char* description) {
-  Serial.print("Testing servos: ");
-  Serial.println(description);
-
-  // Move servos to their minimum positions
-  servo1.write(SERVO_MIN);
-  servo2.write(SERVO_MIN);
-  delay(500);
-
-  // Simulate tilt after moving to minimum position
-  double minTilt = getTilt(description);
-
-  // Move servos to their maximum positions
-  servo1.write(SERVO_MAX);
-  servo2.write(SERVO_MAX);
-  delay(500);
-
-  // Simulate tilt after moving to maximum position
-  double maxTilt = getTilt(description);
-
-  // Check if the tilt is in the expected direction
-  bool testPassed = false;
-  if (strcmp(description, "Driver Side") == 0 && minTilt < initialTilt && maxTilt > initialTilt) {
-    Serial.println("Driver Side servos test passed.");
-    testPassed = true;
-  } else if (strcmp(description, "Passenger Side") == 0 && minTilt > initialTilt && maxTilt < initialTilt) {
-    Serial.println("Passenger Side servos test passed.");
-    testPassed = true;
-  } else if (strcmp(description, "Front") == 0 && minTilt < initialTilt && maxTilt > initialTilt) {
-    Serial.println("Front servos test passed.");
-    testPassed = true;
-  } else if (strcmp(description, "Rear") == 0 && minTilt > initialTilt && maxTilt < initialTilt) {
-    Serial.println("Rear servos test passed.");
-    testPassed = true;
-  } else {
-    Serial.print(description);
-    Serial.println(" servos test failed.");
-    testPassed = false;
-  }
-
-  // Set LED indicators
-  if (testPassed) {
-    setLedIndicator(description, HIGH, LOW);  // Green for success
-  } else {
-    setLedIndicator(description, LOW, HIGH);  // Red for failure
-  }
-
-  return testPassed;
-}
-
-void setLedIndicator(const char* description, int greenState, int redState) {
-  if (strcmp(description, "Driver Side") == 0) {
-    digitalWrite(DRIVER_FRONT_LED, greenState);
-    digitalWrite(DRIVER_REAR_LED, greenState);
-  } else if (strcmp(description, "Passenger Side") == 0) {
-    digitalWrite(PASSENGER_FRONT_LED, greenState);
-    digitalWrite(PASSENGER_REAR_LED, greenState);
-  } else if (strcmp(description, "Front") == 0) {
-    digitalWrite(DRIVER_FRONT_LED, greenState);
-    digitalWrite(PASSENGER_FRONT_LED, greenState);
-  } else if (strcmp(description, "Rear") == 0) {
-    digitalWrite(DRIVER_REAR_LED, greenState);
-    digitalWrite(PASSENGER_REAR_LED, greenState);
-  }
-}
-
-double getTilt(const char* description) {
-  // Generate random mock tilt values
-  // Simulate a failure for one specific servo pair
-  if (strcmp(description, "Driver Side") == 0) {
-    return (rand() % 100) / 10.0;  // Random value between 0.0 and 10.0
-  } else if (strcmp(description, "Passenger Side") == 0) {
-    return 5.0 + (rand() % 50) / 10.0;  // Random value between 5.0 and 10.0
-  } else if (strcmp(description, "Front") == 0) {
-    return 0.0;  // Simulate a failure condition with constant tilt
-  } else if (strcmp(description, "Rear") == 0) {
-    return 5.0 + (rand() % 50) / 10.0;  // Random value between 5.0 and 10.0
-  } else {
-    return 0.0;  // Default value for initial tilt
-  }
-}
-
-void analyzeTestResults() {
-  if (!driverSideTestPassed) Serial.println("Driver Side test failed.");
-  if (!passengerSideTestPassed) Serial.println("Passenger Side test failed.");
-  if (!frontTestPassed) Serial.println("Front test failed.");
-  if (!rearTestPassed) Serial.println("Rear test failed.");
 }
