@@ -12,11 +12,13 @@ const int dialPin = 35;     // GPIO pin connected to the ride height dial (poten
 const int multiplierPin = 36; // GPIO pin connected to the multiplier adjustment (potentiometer)
 const int balancePin = 39; // GPIO pin connected to the balance adjustment (potentiometer)
 const int rangePin = 32; // GPIO pin connected to the range adjustment (potentiometer)
+const int speedPin = 33; // GPIO pin connected to the speed adjustment (potentiometer)
 int midPoint = 90;          // Default mid-point for active suspension (range 0 - 180)
 float multiplier = 1.0;     // Default multiplier value (range 0.05 - 2.0)
 float balance = 0.0;        // Default balance value (-1.0 to 1.0)
 int rangeMin = 0;           // Default range minimum (servo degree limit)
 int rangeMax = 180;         // Default range maximum (servo degree limit)
+int reactionSpeed = 100;    // Default reaction speed (delay in milliseconds)
 
 void setup() {
   Serial.begin(115200);
@@ -42,13 +44,15 @@ void setup() {
   balance = preferences.getFloat("balance", 0.0);
   rangeMin = preferences.getInt("rangeMin", 0);
   rangeMax = preferences.getInt("rangeMax", 180);
+  reactionSpeed = preferences.getInt("reactionSpeed", 100);
 
-  // Setup GPIO for reading PWM signal, dial, multiplier, balance, and range adjustment
+  // Setup GPIO for reading PWM signal, dial, multiplier, balance, range, and speed adjustment
   pinMode(channel6Pin, INPUT);
   pinMode(dialPin, INPUT);
   pinMode(multiplierPin, INPUT);
   pinMode(balancePin, INPUT);
   pinMode(rangePin, INPUT);
+  pinMode(speedPin, INPUT);
 }
 
 void loop() {
@@ -62,6 +66,8 @@ void loop() {
   int rangeValue = analogRead(rangePin);
   rangeMin = map(rangeValue, 0, 4095, 0, 180); // Mapping to range (0-180)
   rangeMax = map(rangeValue, 0, 4095, 0, 180); // Mapping to range (0-180)
+  int speedValue = analogRead(speedPin);
+  reactionSpeed = map(speedValue, 0, 4095, 10, 200); // Mapping speed to range (10-200 ms)
 
   if (pwmValue < 1100) {
     // Switch in low position: Lower suspension, active suspension off
@@ -82,6 +88,7 @@ void loop() {
     preferences.putFloat("balance", balance);
     preferences.putInt("rangeMin", rangeMin);
     preferences.putInt("rangeMax", rangeMax);
+    preferences.putInt("reactionSpeed", reactionSpeed);
   }
 
   delay(100);
@@ -117,9 +124,13 @@ void enableActiveSuspension() {
   frontYPos = constrain(frontYPos, rangeMin, rangeMax);
   rearYPos = constrain(rearYPos, rangeMin, rangeMax);
 
-  // Set servo positions based on tilt, multiplier, balance, and range
+  // Set servo positions based on tilt, multiplier, balance, and range with reaction speed
   frontLeftServo.write(frontPos);
+  delay(reactionSpeed);
   frontRightServo.write(frontYPos);
+  delay(reactionSpeed);
   rearLeftServo.write(rearPos);
+  delay(reactionSpeed);
   rearRightServo.write(rearYPos);
+  delay(reactionSpeed);
 }
