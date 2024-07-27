@@ -10,8 +10,10 @@ Preferences preferences;
 const int channel6Pin = 34; // GPIO pin to read PWM signal from channel 6
 const int dialPin = 35;     // GPIO pin connected to the ride height dial (potentiometer)
 const int multiplierPin = 36; // GPIO pin connected to the multiplier adjustment (potentiometer)
+const int balancePin = 39; // GPIO pin connected to the balance adjustment (potentiometer)
 int midPoint = 90;          // Default mid-point for active suspension (range 0 - 180)
 float multiplier = 1.0;     // Default multiplier value (range 0.05 - 2.0)
+float balance = 0.0;        // Default balance value (-1.0 to 1.0)
 
 void setup() {
   Serial.begin(115200);
@@ -34,11 +36,13 @@ void setup() {
   preferences.begin("suspension", false);
   midPoint = preferences.getInt("midPoint", 90);
   multiplier = preferences.getFloat("multiplier", 1.0);
+  balance = preferences.getFloat("balance", 0.0);
 
-  // Setup GPIO for reading PWM signal, dial, and multiplier adjustment
+  // Setup GPIO for reading PWM signal, dial, multiplier, and balance adjustment
   pinMode(channel6Pin, INPUT);
   pinMode(dialPin, INPUT);
   pinMode(multiplierPin, INPUT);
+  pinMode(balancePin, INPUT);
 }
 
 void loop() {
@@ -47,6 +51,8 @@ void loop() {
   int dialMidPoint = map(dialValue, 0, 4095, 0, 9) * 18; // Mapping dial to steps of 18 (0-180 range)
   int multiplierValue = analogRead(multiplierPin);
   multiplier = map(multiplierValue, 0, 4095, 1, 40) * 0.05; // Mapping to steps of 0.15 (0.05-2.0 range)
+  int balanceValue = analogRead(balancePin);
+  balance = map(balanceValue, 0, 4095, -5, 5) * 0.2; // Mapping to steps of 0.2 (-1.0 to 1.0 range)
 
   if (pwmValue < 1100) {
     // Switch in low position: Lower suspension, active suspension off
@@ -60,10 +66,11 @@ void loop() {
     enableActiveSuspension();
   }
 
-  // Save dial mid-point and multiplier when active suspension is enabled
+  // Save settings when active suspension is enabled
   if (pwmValue > 1100 && pwmValue < 1900) {
     preferences.putInt("midPoint", dialMidPoint);
     preferences.putFloat("multiplier", multiplier);
+    preferences.putFloat("balance", balance);
   }
 
   delay(100);
@@ -86,13 +93,16 @@ void enableActiveSuspension() {
   float angleX = atan2(ay, az) * 180 / PI;
   float angleY = atan2(ax, az) * 180 / PI;
 
-  // Map angles to servo positions (0-180 degrees) and apply multiplier
-  int posX = midPoint + (map(angleX, -90, 90, -45, 45) * multiplier);
-  int posY = midPoint + (map(angleY, -90, 90, -45, 45) * multiplier);
+  // Map angles to servo positions (0-180 degrees) and apply multiplier and balance
+  int frontPos = midPoint + (map(angleX, -90, 90, -45, 45) * multiplier * (1.0 + balance));
+  int rearPos = midPoint + (map(angleX, -90, 90, -45, 45) * multiplier * (1.0 - balance));
 
-  // Set servo positions based on tilt and multiplier
-  frontLeftServo.write(posX);
-  frontRightServo.write(posX);
-  rearLeftServo.write(posY);
-  rearRightServo.write(posY);
+  int frontYPos = midPoint + (map(angleY, -90, 90, -45, 45) * multiplier * (1.0 + balance));
+  int rearYPos = midPoint + (map(angleY, -90, 90, -45, 45) * multiplier * (1.0 - balance));
+
+  // Set servo positions based on tilt, multiplier, and balance
+  frontLeftServo.write(frontPos);
+  frontRightServo.write(frontYPos);
+  rearLeftServo.write(rearPos);
+  rearRightServo.write(rearYPos);
 }
