@@ -1,0 +1,208 @@
+//  This code includes the complete setup, handling of incoming WebSocket messages, updating preferences, broadcasting updates to all clients, and debouncing the slider updates to prevent jitteriness.
+//  still need to work in the ability to connect to wifi (STA) and be it's own Access Point when out in the field. 
+//  the AP works though so no wifi is a minor inconvenience in that I have to switch networks
+//  Note: when in AP mode, there is no password yet; I'll add that later as development is still ongoing.
+
+#include <MPU6050.h>
+#include <ESP32Servo.h>
+#include <Preferences.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <WebSocketsServer.h>
+
+MPU6050 mpu;
+Servo frontLeftServo, frontRightServo, rearLeftServo, rearRightServo;
+Preferences preferences;
+WebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+const char* ssidAP = "TRX_controller";
+const char* ssidSTA = "NETWORKSSID";
+const char* passwordSTA = "NETWORKPASSWORD";
+
+int midPoint = 90;
+float multiplier = 1.0;
+float balance = 0.0;
+int rangeMin = 0;
+int rangeMax = 180;
+int reactionSpeed = 100;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  frontLeftServo.attach(13);
+  frontRightServo.attach(12);
+  rearLeftServo.attach(14);
+  rearRightServo.attach(27);
+
+  preferences.begin("suspension", false);
+  midPoint = preferences.getInt("midPoint", 90);
+  multiplier = preferences.getFloat("multiplier", 1.0);
+  balance = preferences.getFloat("balance", 0.0);
+  rangeMin = preferences.getInt("rangeMin", 0);
+  rangeMax = preferences.getInt("rangeMax", 180);
+  reactionSpeed = preferences.getInt("reactionSpeed", 100);
+
+  // Set up WiFi as Access Point
+  WiFi.softAP(ssidAP);
+  IPAddress apIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(apIP);
+
+  // Output STA IP address and hostname
+  Serial.print("Connected to WiFi. IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("Hostname: ");
+  Serial.println(WiFi.getHostname());
+
+  server.on("/", handleRoot);
+  server.begin();
+  Serial.println("HTTP server started");
+
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+  Serial.println("WebSocket server started");
+}
+
+void loop() {
+  server.handleClient();
+  webSocket.loop();
+}
+
+void handleRoot() {
+  String html = "<html><body>";
+  html += "<h1>Suspension Control</h1>";
+  html += "<form oninput=\"updateValues()\">";
+  html += "Mid Point: <input type=\"range\" id=\"midPoint\" min=\"0\" max=\"180\" value=\"" + String(midPoint) + "\"><br>";
+  html += "Multiplier: <input type=\"range\" id=\"multiplier\" min=\"0.05\" max=\"2.0\" step=\"0.05\" value=\"" + String(multiplier) + "\"><br>";
+  html += "Balance: <input type=\"range\" id=\"balance\" min=\"-1.0\" max=\"1.0\" step=\"0.1\" value=\"" + String(balance) + "\"><br>";
+  html += "Range Min: <input type=\"range\" id=\"rangeMin\" min=\"0\" max=\"180\" value=\"" + String(rangeMin) + "\"><br>";
+  html += "Range Max: <input type=\"range\" id=\"rangeMax\" min=\"0\" max=\"180\" value=\"" + String(rangeMax) + "\"><br>";
+  html += "Reaction Speed: <input type=\"range\" id=\"reactionSpeed\" min=\"10\" max=\"200\" value=\"" + String(reactionSpeed) + "\"><br>";
+  html += "</form>";
+  html += "<script>";
+  html += "var ws = new WebSocket('ws://' + location.hostname + ':81/');";
+  html += "var debounceTimeout;";
+  html += "ws.onmessage = function(event) {";
+  html += "  var data = event.data.split(',');";
+  html += "  data.forEach(function(item) {";
+  html += "    var pair = item.split(':');";
+  html += "    var element = document.getElementById(pair[0]);";
+  html += "    if (element) {";
+  html += "      element.value = pair[1];";
+  html += "    } else {";
+  html += "      console.error('Element not found: ' + pair[0]);";
+  html += "    }";
+  html += "  });";
+  html += "};";
+  html += "function updateValues() {";
+  html += "  clearTimeout(debounceTimeout);";
+  html += "  debounceTimeout = setTimeout(function() {";
+  html += "    var midPoint = document.getElementById('midPoint').value;";
+  html += "    var multiplier = document.getElementById('multiplier').value;";
+  html += "    var balance = document.getElementById('balance').value;";
+  html += "    var rangeMin = document.getElementById('rangeMin').value;";
+  html += "    var rangeMax = document.getElementById('rangeMax').value;";
+  html += "    var reactionSpeed = document.getElementById('reactionSpeed').value;";
+  html += "    var message = 'midPoint:' + midPoint + ',multiplier:' + multiplier + ',balance:' + balance + ',rangeMin:' + rangeMin + ',rangeMax:' + rangeMax + ',reactionSpeed:' + reactionSpeed;";
+  html += "    ws.send(message);";
+  html += "  }, 200);"; // Debounce interval in milliseconds
+  html += "}";
+  html += "</script>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  if (type == WStype_TEXT) {
+    String message = String((char *)payload);
+    Serial.print("Received message: ");
+    Serial.println(message);
+
+    // Split the message into key-value pairs
+    int start = 0;
+    int end = message.indexOf(',');
+
+    while (end != -1) {
+      String pair = message.substring(start, end);
+      int delimiter = pair.indexOf(':');
+      String key = pair.substring(0, delimiter);
+      String value = pair.substring(delimiter + 1);
+
+      Serial.print("Received key: ");
+      Serial.print(key);
+      Serial.print(", value: ");
+      Serial.println(value);
+
+      if (key == "midPoint") {
+        midPoint = value.toInt();
+        preferences.putInt("midPoint", midPoint);
+        Serial.println("midPoint updated");
+      } else if (key == "multiplier") {
+        multiplier = value.toFloat();
+        preferences.putFloat("multiplier", multiplier);
+        Serial.println("multiplier updated");
+      } else if (key == "balance") {
+        balance = value.toFloat();
+        preferences.putFloat("balance", balance);
+        Serial.println("balance updated");
+      } else if (key == "rangeMin") {
+        rangeMin = value.toInt();
+        preferences.putInt("rangeMin", rangeMin);
+        Serial.println("rangeMin updated");
+      } else if (key == "rangeMax") {
+        rangeMax = value.toInt();
+        preferences.putInt("rangeMax", rangeMax);
+        Serial.println("rangeMax updated");
+      } else if (key == "reactionSpeed") {
+        reactionSpeed = value.toInt();
+        preferences.putInt("reactionSpeed", reactionSpeed);
+        Serial.println("reactionSpeed updated");
+      }
+
+      start = end + 1;
+      end = message.indexOf(',', start);
+    }
+
+    // Handle the last key-value pair (or the only one if there is no comma)
+    String pair = message.substring(start);
+    int delimiter = pair.indexOf(':');
+    String key = pair.substring(0, delimiter);
+    String value = pair.substring(delimiter + 1);
+
+    Serial.print("Received key: ");
+    Serial.print(key);
+    Serial.print(", value: ");
+    Serial.println(value);
+
+    if (key == "midPoint") {
+      midPoint = value.toInt();
+      preferences.putInt("midPoint", midPoint);
+      Serial.println("midPoint updated");
+    } else if (key == "multiplier") {
+      multiplier = value.toFloat();
+      preferences.putFloat("multiplier", multiplier);
+      Serial.println("multiplier updated");
+    } else if (key == "balance") {
+      balance = value.toFloat();
+      preferences.putFloat("balance", balance);
+      Serial.println("balance updated");
+    } else if (key == "rangeMin") {
+      rangeMin = value.toInt();
+      preferences.putInt("rangeMin", rangeMin);
+      Serial.println("rangeMin updated");
+    } else if (key == "rangeMax") {
+      rangeMax = value.toInt();
+      preferences.putInt("rangeMax", rangeMax);
+      Serial.println("rangeMax updated");
+    } else if (key == "reactionSpeed") {
+      reactionSpeed = value.toInt();
+      preferences.putInt("reactionSpeed", reactionSpeed);
+      Serial.println("reactionSpeed updated");
+    }
+
+    // Broadcast the updated values to all connected clients
+    webSocket.broadcastTXT(message);
+  }
+}
